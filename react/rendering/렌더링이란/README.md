@@ -13,7 +13,7 @@
   ```
       return <SomeComponent a={42} b="testing">Text here</SomeComponent>
 
-      // 이것을 호출해서 변환된다.
+      // babel에 의해서 이것을 호출해서 변환된다.
       return React.createElement(SomeComponent, {a: 42, b: "testing"}, "Text Here")
 
       // 호출결과 element를 나타내는 객체로 변환된다.
