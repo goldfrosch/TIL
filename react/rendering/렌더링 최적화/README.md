@@ -15,4 +15,6 @@
 ## 불필요한 렌더링 방지법
 
 - React.memo()
+  - https://github.com/goldfrosch/FE-TIL/tree/main/react/rendering/%EB%A0%8C%EB%8D%94%EB%A7%81%20%EC%B5%9C%EC%A0%81%ED%99%94/memoization
 - props
+  - https://github.com/goldfrosch/FE-TIL/tree/main/react/rendering/%EB%A0%8C%EB%8D%94%EB%A7%81%20%EC%B5%9C%EC%A0%81%ED%99%94/props
