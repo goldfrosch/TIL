@@ -180,6 +180,8 @@ TDD는 주로 단위 테스트를 하게 되는데 단위 테스트는 어떤 �
 
 // TODO: 스프링 프레임워크랑 bean 어노테이션에 대해 구체적으로 적어보기
 
+https://sg-moomin.tistory.com/entry/Java-Spring-%EC%9D%B4%EB%A1%A0-%EC%A0%95%EB%A6%AC
+
 #### 장점
 
 모듈들을 쉽게 교체할 수 있는 구조가 되어 테스팅하기 쉽고 마이그레이션 하기도 수월하다.
