@@ -76,7 +76,7 @@ MVC 패턴에서 컨트롤러가 VM(View Model)로 바뀐 패턴이다.
 
 형식이다. 데이터 흐름이 항상 한방향으로 흘러 Dispatch는 Store로 Store는 View로 View는 Action으로 Action은 Dispather로 무조건 한 방향으로 흐르게해 데이터 변화를 훨씬 예측하기 더 쉽게 만들었다.
 
-Flux는 크게 Dispatcher, Store, View 3가지로 구분됟나.
+Flux는 크게 Dispatcher, Store, View 3가지로 구분된다.
 
 #### Dispatcher
 
