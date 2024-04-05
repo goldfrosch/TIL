@@ -41,11 +41,9 @@ function mountStateImpl<S>(initialState: (() => S) | S): Hook {
   const hook = mountWorkInProgressHook();
   if (typeof initialState === 'function') {
     const initialStateInitializer = initialState;
-    // $FlowFixMe[incompatible-use]: Flow doesn't like mixed types
     initialState = initialStateInitializer();
     if (shouldDoubleInvokeUserFnsInHooksDEV) {
       setIsStrictModeForDevtools(true);
-      // $FlowFixMe[incompatible-use]: Flow doesn't like mixed types
       initialStateInitializer();
       setIsStrictModeForDevtools(false);
     }
@@ -91,7 +89,7 @@ if (typeof initialState === 'function') {
 
    특이하게 parameter를 새로운 상수로 할당하고 다시 그 parameter를 새로 할당한 상수로 다지 지정하는 방식을 활용하는 구조를 사용한다.
 
-   // TODO: 의미가 있는 방법일까...? 오히려 안티패턴으로 보이나 우선은 넘어가기로 한다.
+   밑에 처럼 사용한 이유는 잠시 함수를 복사하고 기존의 initialState에는 함수 실행의 결과를 저장하기 위함
 
    ```
    const initialStateInitializer = initialState;
@@ -135,11 +133,13 @@ if (typeof initialState === 'function') {
 
 위에서 initialize하면서 초기값을 할당하는 작업까지 굉장히 복잡한 일련의 과정을 겪었다. 그 후 queue의 dispatch에 어떤 액션을 실행 시킬 지 정보를 넣어준다.
 
+평소에는 사용하지 않는 function.bind를 이용해서 parameter를 바인딩 시킨 후 return 해줌으로써 호출 할 때 binding된 객체들을 이용해 함수를 호출할 수 있도록 만들어주었다
+
 ```
 const queue = hook.queue;
   const dispatch: Dispatch<BasicStateAction<S>> = (dispatchSetState.bind(
     null,
-    currentlyRenderingFiber,
+    currentlyRenderingFiber, // any로 타입이 지정되어있어 열받지만... 일단 현재 실행중인 queue를 업데이트하거나 현재 진행중인 hook의 타입 등을 저장하는 용도로 보인다.
     queue,
   ): any);
   queue.dispatch = dispatch;
@@ -147,3 +147,149 @@ const queue = hook.queue;
 ```
 
 #### dispatchSetState
+
+밑의 코드는 해석이 불필요해 보이는 or 과도한 코드들은 제거했다. (개발환경 용 코드 and 주석)
+
+```
+function dispatchSetState<S, A>(
+  fiber: Fiber,
+  queue: UpdateQueue<S, A>,
+  action: A,
+): void {
+  const lane = requestUpdateLane(fiber);
+
+  const update: Update<S, A> = {
+    lane,
+    revertLane: NoLane,
+    action,
+    hasEagerState: false,
+    eagerState: null,
+    next: (null: any),
+  };
+
+  if (isRenderPhaseUpdate(fiber)) {
+    enqueueRenderPhaseUpdate(queue, update);
+  } else {
+    const alternate = fiber.alternate;
+    if (
+      fiber.lanes === NoLanes &&
+      (alternate === null || alternate.lanes === NoLanes)
+    ) {
+      const lastRenderedReducer = queue.lastRenderedReducer;
+      if (lastRenderedReducer !== null) {
+        let prevDispatcher;
+        try {
+          const currentState: S = (queue.lastRenderedState: any);
+          const eagerState = lastRenderedReducer(currentState, action);
+          update.hasEagerState = true;
+          update.eagerState = eagerState;
+          if (is(eagerState, currentState)) {
+            enqueueConcurrentHookUpdateAndEagerlyBailout(fiber, queue, update);
+            return;
+          }
+        }
+      }
+    }
+
+    const root = enqueueConcurrentHookUpdate(fiber, queue, update, lane);
+    if (root !== null) {
+      scheduleUpdateOnFiber(root, fiber, lane);
+      entangleTransitionUpdate(root, queue, lane);
+    }
+  }
+
+  markUpdateInDevTools(fiber, lane, action);
+}
+```
+
+##### 변수 선언
+
+```
+const lane = requestUpdateLane(fiber);
+
+const update: Update<S, A> = {
+    lane,
+    revertLane: NoLane,
+    action,
+    hasEagerState: false,
+    eagerState: null,
+    next: (null: any),
+  };
+```
+
+총 2개의 변수를 선언해주는 작업을 진행한다.
+
+1. lane: `/packages/react-reconciler/src/ReactFiberWorkLoop.js`에 존재하는 함수로 (TODO: 추후 조사후 링크 삽입) work loop돌려 재조정(reconciler) 위해 정보를 설정해주고 그 결과값을 반환
+2. update: 다음 업데이트를 위한 객체 정보 설정 후 반환
+
+##### 메인 로직
+
+```
+if (isRenderPhaseUpdate(fiber)) {
+    enqueueRenderPhaseUpdate(queue, update);
+  } else {
+    const alternate = fiber.alternate;
+    if (
+      fiber.lanes === NoLanes &&
+      (alternate === null || alternate.lanes === NoLanes)
+    ) {
+      const lastRenderedReducer = queue.lastRenderedReducer;
+      if (lastRenderedReducer !== null) {
+        let prevDispatcher;
+        try {
+          const currentState: S = (queue.lastRenderedState: any);
+          const eagerState = lastRenderedReducer(currentState, action);
+          update.hasEagerState = true;
+          update.eagerState = eagerState;
+          if (is(eagerState, currentState)) {
+            enqueueConcurrentHookUpdateAndEagerlyBailout(fiber, queue, update);
+            return;
+          }
+        }
+      }
+    }
+
+    const root = enqueueConcurrentHookUpdate(fiber, queue, update, lane);
+    if (root !== null) {
+      scheduleUpdateOnFiber(root, fiber, lane);
+      entangleTransitionUpdate(root, queue, lane);
+    }
+  }
+```
+
+isRenderPhaseUpdate의 상태에 따라 다음 큐를 동작시키기 위한 작업을 진행한다.
+
+###### isRenderPhaseUpdate
+
+setState, setReducer에서 주로 사용하는 함수로 상태 업데이트를 위한 queue의 동작을 실행시키고 queue 내용물을 다음으로 옮기는 작업을 수행한다.
+
+```
+function enqueueRenderPhaseUpdate<S, A>(
+  queue: UpdateQueue<S, A>,
+  update: Update<S, A>,
+): void {
+  /**
+   이 과정은 렌더 페이즈(계산 작업)를 위한 작업이다. queue형태에서 linked list 형태의 updates로 지연 생성된 맵에 업데이트 내역을 저장한다.
+   렌더 페이즈가 마무리 되면 work-in-progress hook에 저장된 가장 첫번째 업데이트를 적용한다.
+
+   주의) 위 코멘트는 리액트 주석을 작성자가 번역해 오역이 있을 수 있다.
+  */
+  didScheduleRenderPhaseUpdateDuringThisPass = didScheduleRenderPhaseUpdate =
+    true;
+  const pending = queue.pending;
+  if (pending === null) {
+    // This is the first update. Create a circular list.
+    update.next = update;
+  } else {
+    update.next = pending.next;
+    pending.next = update;
+  }
+  queue.pending = update;
+}
+```
+
+주석에 따르면 렌더 페이즈를 위해 queue 형태에서 linked-list 형태의 update로 지연 생성된 맵에 업데이트 내역을 저장 후 workInProgress hook 정보에 저장되어있는 첫번째 업데이트를 적용하기 위한 로직이다.
+
+didScheduleRenderPhaseUpdateDuringThisPass, didScheduleRenderPhaseUpdate는 `스케쥴링의 업데이트를 위한 변수 (아닐 수 있음)`로 ReactFiberHooks에서만 사용하는 변수다.
+
+- isRenderPhaseUpdate -> fiber 정보를 기반으로 현재 렌더링 중인지 정보를 가져오는 함수 (boolean으로 return)
