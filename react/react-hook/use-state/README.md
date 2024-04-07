@@ -259,37 +259,117 @@ if (isRenderPhaseUpdate(fiber)) {
 
 isRenderPhaseUpdate의 상태에 따라 다음 큐를 동작시키기 위한 작업을 진행한다.
 
-###### isRenderPhaseUpdate
+isRenderPhaseUpdate -> fiber 정보를 기반으로 현재 렌더링 중인지 정보를 가져오는 함수 (boolean으로 return)
 
-setState, setReducer에서 주로 사용하는 함수로 상태 업데이트를 위한 queue의 동작을 실행시키고 queue 내용물을 다음으로 옮기는 작업을 수행한다.
+- case1. isRenderPhaseUpdate가 true 인 경우
+  setState, setReducer에서 주로 사용하는 함수로 상태 업데이트를 위한 queue의 동작을 실행시키고 queue 내용물을 다음으로 옮기는 작업을 수행한다.
 
-```
-function enqueueRenderPhaseUpdate<S, A>(
-  queue: UpdateQueue<S, A>,
-  update: Update<S, A>,
-): void {
-  /**
-   이 과정은 렌더 페이즈(계산 작업)를 위한 작업이다. queue형태에서 linked list 형태의 updates로 지연 생성된 맵에 업데이트 내역을 저장한다.
-   렌더 페이즈가 마무리 되면 work-in-progress hook에 저장된 가장 첫번째 업데이트를 적용한다.
+  ```
+  function enqueueRenderPhaseUpdate<S, A>(
+    queue: UpdateQueue<S, A>,
+    update: Update<S, A>,
+  ): void {
+    /**
+    이 과정은 렌더 페이즈(계산 작업)를 위한 작업이다. queue형태에서 linked list 형태의 updates로 지연 생성된 맵에 업데이트 내역을 저장한다.
+    렌더 페이즈가 마무리 되면 work-in-progress hook에 저장된 가장 첫번째 업데이트를 적용한다.
 
-   주의) 위 코멘트는 리액트 주석을 작성자가 번역해 오역이 있을 수 있다.
-  */
-  didScheduleRenderPhaseUpdateDuringThisPass = didScheduleRenderPhaseUpdate =
-    true;
-  const pending = queue.pending;
-  if (pending === null) {
-    // This is the first update. Create a circular list.
-    update.next = update;
-  } else {
-    update.next = pending.next;
-    pending.next = update;
+    주의) 위 코멘트는 리액트 주석을 작성자가 번역해 오역이 있을 수 있다.
+    */
+    didScheduleRenderPhaseUpdateDuringThisPass = didScheduleRenderPhaseUpdate =
+      true;
+    const pending = queue.pending;
+    if (pending === null) {
+      // This is the first update. Create a circular list.
+      update.next = update;
+    } else {
+      update.next = pending.next;
+      pending.next = update;
+    }
+    queue.pending = update;
   }
-  queue.pending = update;
-}
-```
+  ```
 
-주석에 따르면 렌더 페이즈를 위해 queue 형태에서 linked-list 형태의 update로 지연 생성된 맵에 업데이트 내역을 저장 후 workInProgress hook 정보에 저장되어있는 첫번째 업데이트를 적용하기 위한 로직이다.
+  주석에 따르면 렌더 페이즈를 위해 queue 형태에서 linked-list 형태의 update로 지연 생성된 맵에 업데이트 내역을 저장 후 workInProgress hook 정보에 저장되어있는 첫번째 업데이트를 적용하기 위한 로직이다.
 
-didScheduleRenderPhaseUpdateDuringThisPass, didScheduleRenderPhaseUpdate는 `스케쥴링의 업데이트를 위한 변수 (아닐 수 있음)`로 ReactFiberHooks에서만 사용하는 변수다.
+  didScheduleRenderPhaseUpdateDuringThisPass, didScheduleRenderPhaseUpdate는 `스케쥴링의 업데이트를 위한 변수 (아닐 수 있음)`로 ReactFiberHooks에서만 사용하는 변수다.
 
-- isRenderPhaseUpdate -> fiber 정보를 기반으로 현재 렌더링 중인지 정보를 가져오는 함수 (boolean으로 return)
+- case2. isRenderPhaseUpdate가 false인 경우
+
+  ```
+  const alternate = fiber.alternate;
+    if (
+      fiber.lanes === NoLanes &&
+      (alternate === null || alternate.lanes === NoLanes)
+    ) {
+      const lastRenderedReducer = queue.lastRenderedReducer;
+      if (lastRenderedReducer !== null) {
+        let prevDispatcher;
+        try {
+          const currentState: S = (queue.lastRenderedState: any);
+          const eagerState = lastRenderedReducer(currentState, action);
+          update.hasEagerState = true;
+          update.eagerState = eagerState;
+          if (is(eagerState, currentState)) {
+            enqueueConcurrentHookUpdateAndEagerlyBailout(fiber, queue, update);
+            return;
+          }
+        }
+      }
+    }
+
+    const root = enqueueConcurrentHookUpdate(fiber, queue, update, lane);
+    if (root !== null) {
+      scheduleUpdateOnFiber(root, fiber, lane);
+      entangleTransitionUpdate(root, queue, lane);
+    }
+  ```
+
+  This is a pooled version of a Fiber. Every fiber that gets updated will eventually have a pair. There are cases when we can clean up pairs to save memory if we need to. (fiber.alternate 의 주석)
+
+  fiber의 대기 버전을 의미하여 모든 fiber는 업데이트 되는 모든 fiber는 쌍을 갖게 된다. 필요한 경우 메모리를 절약하기 위해 쌍을 정리하는 경우도 있다.
+
+  fiber의 alternate는 자기 자신 or null이 들어가는 재귀 객체 구조다. 즉 대기 중인 fiber 정보를 가져오는 것으로 추정된다.
+
+  - lane: number로 되어있고 각 lane마다 고유한 32bit 값으로 구성되어 있다. 조정 시점의 작업 우선순위를 정하기 위한 고유 값으로 보이며 `react/react-reconciler/src/ReactFiberLane.js`를 참고하면 여러 lane들이 할당 되었음을 볼 수 있다.
+
+    ```
+    export const NoLanes: Lanes = 0b0000000000000000000000000000000;
+
+    export const NoLane: Lane =  0b0000000000000000000000000000000;
+
+    export const SyncHydrationLane: Lane = 0b0000000000000000000000000000001;
+    export const SyncLane: Lane = 0b0000000000000000000000000000010;
+    export const SyncLaneIndex: number = 1;
+    .
+    .
+    ```
+
+    다시 원 주제로 돌아오면 lane에서 현재 fiber의 우선순위가 NoLanes등급인 경우에 alternate가 null이거나 alternate.lanes가 NoLanes 등급이라면 if문으로 넘어가게 된다.
+
+  ```
+  const lastRenderedReducer = queue.lastRenderedReducer;
+      if (lastRenderedReducer !== null) {
+        let prevDispatcher;
+        try {
+          const currentState: S = (queue.lastRenderedState: any);
+          const eagerState = lastRenderedReducer(currentState, action);
+          update.hasEagerState = true;
+          update.eagerState = eagerState;
+          if (is(eagerState, currentState)) {
+            enqueueConcurrentHookUpdateAndEagerlyBailout(fiber, queue, update);
+            return;
+          }
+        }
+      }
+  ```
+
+  queue.lastRenderedReducer 정보를 가져와 값이 null이 아닌 경우에 대해 처리하는데, lastRenderReducer의 경우 queue에서 실행할 함수들을 넣는다. (useState 기준으로는 basicStateReducer 정보를 담아준다.)
+
+  ```
+  function basicStateReducer<S>(state: S, action: BasicStateAction<S>): S {
+    // 함수면 실행 후 결과값을, 아니라면 action 정보를 return 해준다
+    return typeof action === 'function' ? action(state) : action;
+  }
+  ```
+
+  TODO: 더 알아가야할 부분이지만 이 곳에서 setState가 그냥 value와 arrow function의 반응이 다른 이유는 아마 기본 state는 memoization state를 반환하고 있고, setState로 기본 값을 넣을 때는 memoization 값 기반으로 하기 때문에 rerender되지 않으면 값이 memoization state가 변화하지 않고 arrow function으로 가져온 state의 경우 basicState기 때문에 변화한 값을 계속 저장하는 baseState가 기준이기 때문에 마지막 반응만 동작하게 되는 것이다. (정확하게는 마지막 반응이 아닌 memoization state 기반으로 돌아가는 것이 문제일 것)
