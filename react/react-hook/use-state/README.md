@@ -372,4 +372,18 @@ isRenderPhaseUpdate -> fiber 정보를 기반으로 현재 렌더링 중인지 �
   }
   ```
 
-  TODO: 더 알아가야할 부분이지만 이 곳에서 setState가 그냥 value와 arrow function의 반응이 다른 이유는 아마 기본 state는 memoization state를 반환하고 있고, setState로 기본 값을 넣을 때는 memoization 값 기반으로 하기 때문에 rerender되지 않으면 값이 memoization state가 변화하지 않고 arrow function으로 가져온 state의 경우 basicState기 때문에 변화한 값을 계속 저장하는 baseState가 기준이기 때문에 마지막 반응만 동작하게 되는 것이다. (정확하게는 마지막 반응이 아닌 memoization state 기반으로 돌아가는 것이 문제일 것)
+  이후 try 문을 통해 currentState와 eagerState 정보를 가져온다. currentState는 마지막 render된 state값, 즉 현재 state값이고, eagerState는 변화된 값을 말한다. 이후 변화된 eagerState 상태에 대해 boolean값 즉 true로 값을 저장하고 eagerState를 update queue에 저장한다.
+
+  이후 if문을 통해 eagerState와 currentState가 동일하면 `enqueueConcurrentHookUpdateAndEagerlyBailout`함수를 호출해 컴포넌트 리렌더링을 멈추는 작업을 실행한다.
+
+  ```
+  const root = enqueueConcurrentHookUpdate(fiber, queue, update, lane);
+  if (root !== null) {
+    scheduleUpdateOnFiber(root, fiber, lane);
+    entangleTransitionUpdate(root, queue, lane);
+  }
+  ```
+
+  마지막으로는 업데이트 할 root를 가져와 root 값이 존재할 때 스케줄링 업데이트를 진행한다.
+
+  `entangleTransitionUpdate`에 대해 설명을 적지 않음은 해당 함수에 대해 리액트 개발자들도 ReactFiberConcurrentUpdates로 빠져야 할 함수이지 않을까라는 얘기가 있어 추후 더 조사할 예정
